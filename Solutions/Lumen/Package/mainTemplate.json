@@ -1,0 +1,929 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "author": "Lumen Technologies - support@lumen.com",
+    "comments": "Solution template for Lumen"
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "minLength": 1,
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Not used, but needed to pass arm-ttk test `Location-Should-Not-Be-Hardcoded`.  We instead use the `workspace-location` which is derived from the LA workspace"
+      }
+    },
+    "workspace-location": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "[concat('Region to deploy solution resources -- separate from location selection',parameters('location'))]"
+      }
+    },
+    "workspace": {
+      "defaultValue": "",
+      "type": "string",
+      "metadata": {
+        "description": "Workspace name for Log Analytics where Microsoft Sentinel is setup"
+      }
+    },
+    "workbook1-name": {
+      "type": "string",
+      "defaultValue": null,
+      "minLength": 1,
+      "metadata": {
+        "description": "Name for the workbook"
+      }
+    }
+  },
+  "variables": {
+    "email": "support@lumen.com",
+    "_email": "[variables('email')]",
+    "_solutionName": "Lumen",
+    "_solutionVersion": "3.0.0",
+    "solutionId": "lumen.azure-sentinel-solution-lumen-threat-intelligence",
+    "_solutionId": "[variables('solutionId')]",
+    "Lumen-ImportThreatIntelligenceToSentinel": "Lumen-ImportThreatIntelligenceToSentinel",
+    "_Lumen-ImportThreatIntelligenceToSentinel": "[variables('Lumen-ImportThreatIntelligenceToSentinel')]",
+    "blanks": "[replace('b', 'b', '')]",
+    "playbookVersion1": "1.0",
+    "playbookContentId1": "Lumen-ImportThreatIntelligenceToSentinel",
+    "_playbookContentId1": "[variables('playbookContentId1')]",
+    "playbookId1": "[resourceId('Microsoft.Logic/workflows', variables('playbookContentId1'))]",
+    "playbookTemplateSpecName1": "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/',concat(parameters('workspace'),'-pl-',uniquestring(variables('_playbookContentId1'))))]",
+    "workspaceResourceId": "[resourceId('microsoft.OperationalInsights/Workspaces', parameters('workspace'))]",
+    "_playbookcontentProductId1": "[concat(take(variables('_solutionId'),50),'-','pl','-', uniqueString(concat(variables('_solutionId'),'-','Playbook','-',variables('_playbookContentId1'),'-', variables('playbookVersion1'))))]",
+    "workbookVersion1": "",
+    "workbookContentId1": "",
+    "workbookId1": "[resourceId('Microsoft.Insights/workbooks', variables('workbookContentId1'))]",
+    "workbookTemplateSpecName1": "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/',concat(parameters('workspace'),'-wb-',uniquestring(variables('_workbookContentId1'))))]",
+    "_workbookContentId1": "[variables('workbookContentId1')]",
+    "_workbookcontentProductId1": "[concat(take(variables('_solutionId'),50),'-','wb','-', uniqueString(concat(variables('_solutionId'),'-','Workbook','-',variables('_workbookContentId1'),'-', variables('workbookVersion1'))))]",
+    "_solutioncontentProductId": "[concat(take(variables('_solutionId'),50),'-','sl','-', uniqueString(concat(variables('_solutionId'),'-','Solution','-',variables('_solutionId'),'-', variables('_solutionVersion'))))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/contentTemplates",
+      "apiVersion": "2023-04-01-preview",
+      "name": "[variables('playbookTemplateSpecName1')]",
+      "location": "[parameters('workspace-location')]",
+      "dependsOn": [
+        "[extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspace')), 'Microsoft.SecurityInsights/contentPackages', variables('_solutionId'))]"
+      ],
+      "properties": {
+        "description": "Lumen-ImportThreatIntelligenceToSentinel Playbook with template version 3.0.0",
+        "mainTemplate": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "[variables('playbookVersion1')]",
+          "parameters": {
+            "PlaybookName": {
+              "defaultValue": "Lumen-ImportThreatIntelligenceToSentinel",
+              "type": "String"
+            },
+            "StorageAccountName": {
+              "type": "String",
+              "metadata": {
+                "description": "Name of the pre-existing Storage Account where Logic App can store helper data."
+              }
+            },
+            "StorageAccountContainerName": {
+              "type": "String",
+              "metadata": {
+                "description": "Name of the pre-existing blob container inside provided Storage Account."
+              }
+            },
+            "KeyVaultName": {
+              "type": "String",
+              "metadata": {
+                "description": "Name of the pre-existing Key Vault with Lumen API key. The API key is expected under the key: LumenAPIKeySentinel"
+              }
+            },
+            "WorkspaceID": {
+              "type": "String",
+              "metadata": {
+                "description": "ID of the Log Analytics workspace to which the indicators will be directed."
+              }
+            },
+            "LookBackDays": {
+              "defaultValue": 7,
+              "type": "int",
+              "metadata": {
+                "description": "How many days of history should be pulled on the first run. Leave 7 for a week of data."
+              }
+            }
+          },
+          "variables": {
+            "MicrosoftSentinelConnectionName": "[[concat('sentinel-', parameters('PlaybookName'))]",
+            "AzureBlobConnectionName": "[[concat('azureblob-', parameters('PlaybookName'))]",
+            "AzureKeyVaultConnectionName": "[[concat('keyvault-', parameters('PlaybookName'))]",
+            "connection-1": "[[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', variables('workspace-location-inline'), '/managedApis/Azuresentinel')]",
+            "_connection-1": "[[variables('connection-1')]",
+            "connection-2": "[[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', variables('workspace-location-inline'), '/managedApis/azureblob')]",
+            "_connection-2": "[[variables('connection-2')]",
+            "connection-3": "[[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', variables('workspace-location-inline'), '/managedApis/keyvault')]",
+            "_connection-3": "[[variables('connection-3')]",
+            "workspace-location-inline": "[concat('[resourceGroup().locatio', 'n]')]",
+            "workspace-name": "[parameters('workspace')]",
+            "workspaceResourceId": "[[resourceId('microsoft.OperationalInsights/Workspaces', variables('workspace-name'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Web/connections",
+              "apiVersion": "2016-06-01",
+              "name": "[[variables('MicrosoftSentinelConnectionName')]",
+              "location": "[[variables('workspace-location-inline')]",
+              "kind": "V1",
+              "properties": {
+                "displayName": "[[variables('MicrosoftSentinelConnectionName')]",
+                "parameterValueType": "Alternative",
+                "api": {
+                  "id": "[[variables('_connection-1')]"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Web/connections",
+              "apiVersion": "2016-06-01",
+              "name": "[[variables('AzureBlobConnectionName')]",
+              "location": "[[variables('workspace-location-inline')]",
+              "properties": {
+                "displayName": "[[variables('AzureBlobConnectionName')]",
+                "api": {
+                  "id": "[[variables('_connection-2')]"
+                },
+                "parameterValues": {
+                  "accountName": "[[parameters('StorageAccountName')]",
+                  "accessKey": "[[listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('StorageAccountName')), '2022-09-01').keys[0].value]"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Web/connections",
+              "apiVersion": "2016-06-01",
+              "name": "[[variables('AzureKeyVaultConnectionName')]",
+              "location": "[[variables('workspace-location-inline')]",
+              "kind": "V1",
+              "properties": {
+                "displayName": "[[variables('AzureKeyVaultConnectionName')]",
+                "api": {
+                  "id": "[[variables('_connection-3')]"
+                },
+                "parameterValueType": "Alternative",
+                "alternativeParameterValues": {
+                  "vaultName": "[[parameters('KeyVaultName')]"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Logic/workflows",
+              "apiVersion": "2017-07-01",
+              "name": "[[parameters('PlaybookName')]",
+              "location": "[[variables('workspace-location-inline')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "dependsOn": [
+                "[[resourceId('Microsoft.Web/connections', variables('MicrosoftSentinelConnectionName'))]",
+                "[[resourceId('Microsoft.Web/connections', variables('AzureBlobConnectionName'))]",
+                "[[resourceId('Microsoft.Web/connections', variables('AzureKeyVaultConnectionName'))]"
+              ],
+              "tags": {
+                "LogicAppsCategory": "security",
+                "hidden-SentinelWorkspaceId": "[[variables('workspaceResourceId')]"
+              },
+              "properties": {
+                "state": "Enabled",
+                "definition": {
+                  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                  "contentVersion": "1.0.0.0",
+                  "parameters": {
+                    "$connections": {
+                      "type": "Object"
+                    },
+                    "StorageAccountName": {
+                      "defaultValue": "[variables('blanks')]",
+                      "type": "String"
+                    },
+                    "StorageAccountContainerName": {
+                      "defaultValue": "[variables('blanks')]",
+                      "type": "String"
+                    },
+                    "BlobNameCursor": {
+                      "defaultValue": "cursorSentinel.txt",
+                      "type": "String"
+                    },
+                    "BlobNameFromDate": {
+                      "defaultValue": "fromdateSentinel.txt",
+                      "type": "String"
+                    },
+                    "LookBackDays": {
+                      "defaultValue": 7,
+                      "type": "int"
+                    },
+                    "WorkspaceID": {
+                      "type": "String"
+                    }
+                  },
+                  "triggers": {
+                    "Recurrence": {
+                      "recurrence": {
+                        "frequency": "Hour",
+                        "interval": 4
+                      },
+                      "runtimeConfiguration": {
+                        "concurrency": {
+                          "runs": 1
+                        }
+                      },
+                      "type": "Recurrence"
+                    }
+                  },
+                  "actions": {
+                    "InitializeVariables": {
+                      "actions": {
+                        "Initialize_collectedIndicators": {
+                          "type": "InitializeVariable",
+                          "inputs": {
+                            "variables": [
+                              {
+                                "name": "collectedIndicators",
+                                "type": "array"
+                              }
+                            ]
+                          }
+                        },
+                        "Initialize_cursor": {
+                          "runAfter": {
+                            "Initialize_collectedIndicators": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "InitializeVariable",
+                          "inputs": {
+                            "variables": [
+                              {
+                                "name": "cursor",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        },
+                        "Initialize_fromDate": {
+                          "runAfter": {
+                            "Initialize_cursor": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "InitializeVariable",
+                          "inputs": {
+                            "variables": [
+                              {
+                                "name": "fromDate",
+                                "type": "string",
+                                "value": "@formatDateTime(addDays(utcnow(), mul(parameters('LookBackDays'), -1)), 'yyyy-MM-ddTHH:mm:ssZ')"
+                              }
+                            ]
+                          }
+                        },
+                        "Initialize_presignedURL": {
+                          "runAfter": {
+                            "Initialize_fromDate": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "InitializeVariable",
+                          "inputs": {
+                            "variables": [
+                              {
+                                "name": "presignedURL",
+                                "type": "string"
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "type": "Scope"
+                    },
+                    "ManageCursor": {
+                      "actions": {
+                        "GetCursorFromBlob": {
+                          "type": "ApiConnection",
+                          "inputs": {
+                            "host": {
+                              "connection": {
+                                "name": "@parameters('$connections')['azureblob']['connectionId']"
+                              }
+                            },
+                            "method": "get",
+                            "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('StorageAccountName')))}/files/@{encodeURIComponent(encodeURIComponent(parameters('StorageAccountContainerName'),'/',parameters('BlobNameCursor')))}/content",
+                            "queries": {
+                              "inferContentType": true
+                            }
+                          }
+                        },
+                        "IfCursorExists": {
+                          "actions": {
+                            "SetCursor": {
+                              "type": "SetVariable",
+                              "inputs": {
+                                "name": "cursor",
+                                "value": "@string(body('GetCursorFromBlob'))"
+                              }
+                            }
+                          },
+                          "runAfter": {
+                            "GetCursorFromBlob": [
+                              "Succeeded",
+                              "Failed"
+                            ]
+                          },
+                          "expression": {
+                            "and": [
+                              {
+                                "not": {
+                                  "equals": [
+                                    "@actions('GetCursorFromBlob').outputs.statusCode",
+                                    404
+                                  ]
+                                }
+                              }
+                            ]
+                          },
+                          "type": "If"
+                        }
+                      },
+                      "runAfter": {
+                        "InitializeVariables": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "Scope"
+                    },
+                    "GetCredentials": {
+                      "actions": {
+                        "Get_API_Key": {
+                          "type": "ApiConnection",
+                          "inputs": {
+                            "host": {
+                              "connection": {
+                                "name": "@parameters('$connections')['keyvault']['connectionId']"
+                              }
+                            },
+                            "method": "get",
+                            "path": "/secrets/@{encodeURIComponent('LumenAPIKeySentinel')}/value"
+                          }
+                        }
+                      },
+                      "runAfter": {
+                        "ManageCursor": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "Scope"
+                    },
+                    "Step1_RequestPresignedURL": {
+                      "actions": {
+                        "HTTP_RequestPresignedURL": {
+                          "type": "Http",
+                          "inputs": {
+                            "headers": {
+                              "x-api-key": "@body('Get_API_Key')?['value']",
+                              "Content-Type": "application/json"
+                            },
+                            "method": "POST",
+                            "uri": "https://api.lumen.com/v1/threat-intelligence/download-url",
+                            "body": "@if(empty(variables('cursor')), createObject('from_date', variables('fromDate')), createObject('cursor', variables('cursor')))"
+                          }
+                        },
+                        "Handle_PresignedURL_Error": {
+                          "actions": {
+                            "Log_PresignedURL_Error": {
+                              "type": "Compose",
+                              "inputs": "Failed to get presigned URL: @{body('HTTP_RequestPresignedURL')}"
+                            },
+                            "Terminate_PresignedURL_Error": {
+                              "runAfter": {
+                                "Log_PresignedURL_Error": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "Terminate",
+                              "inputs": {
+                                "runStatus": "Failed",
+                                "runError": {
+                                  "message": "Failed to retrieve presigned URL from Lumen API"
+                                }
+                              }
+                            }
+                          },
+                          "runAfter": {
+                            "HTTP_RequestPresignedURL": [
+                              "Failed"
+                            ]
+                          },
+                          "type": "Scope"
+                        },
+                        "Parse_PresignedURL_Response": {
+                          "runAfter": {
+                            "HTTP_RequestPresignedURL": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "ParseJson",
+                          "inputs": {
+                            "content": "@body('HTTP_RequestPresignedURL')",
+                            "schema": {
+                              "type": "object",
+                              "properties": {
+                                "presigned_url": {
+                                  "type": "string"
+                                },
+                                "next_cursor": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "Set_PresignedURL": {
+                          "runAfter": {
+                            "Parse_PresignedURL_Response": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "presignedURL",
+                            "value": "@body('Parse_PresignedURL_Response')?['presigned_url']"
+                          }
+                        }
+                      },
+                      "runAfter": {
+                        "GetCredentials": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "Scope"
+                    },
+                    "Step2_FetchIndicators": {
+                      "actions": {
+                        "HTTP_FetchIndicators": {
+                          "type": "Http",
+                          "inputs": {
+                            "headers": {
+                              "x-api-key": "@body('Get_API_Key')?['value']"
+                            },
+                            "method": "GET",
+                            "uri": "@variables('presignedURL')"
+                          }
+                        },
+                        "Handle_Indicators_Error": {
+                          "actions": {
+                            "Log_Indicators_Error": {
+                              "type": "Compose",
+                              "inputs": "Failed to fetch indicators: @{body('HTTP_FetchIndicators')}"
+                            },
+                            "Terminate_Indicators_Error": {
+                              "runAfter": {
+                                "Log_Indicators_Error": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "Terminate",
+                              "inputs": {
+                                "runStatus": "Failed",
+                                "runError": {
+                                  "message": "Failed to retrieve indicators from presigned URL"
+                                }
+                              }
+                            }
+                          },
+                          "runAfter": {
+                            "HTTP_FetchIndicators": [
+                              "Failed"
+                            ]
+                          },
+                          "type": "Scope"
+                        },
+                        "Parse_Indicators_Response": {
+                          "runAfter": {
+                            "HTTP_FetchIndicators": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "ParseJson",
+                          "inputs": {
+                            "content": "@body('HTTP_FetchIndicators')",
+                            "schema": {
+                              "type": "object",
+                              "properties": {
+                                "indicators": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string"
+                                      },
+                                      "value": {
+                                        "type": "string"
+                                      },
+                                      "confidence": {
+                                        "type": "string"
+                                      },
+                                      "created_time": {
+                                        "type": "string"
+                                      },
+                                      "valid_until": {
+                                        "type": "string"
+                                      },
+                                      "labels": {
+                                        "type": "array"
+                                      }
+                                    }
+                                  }
+                                },
+                                "next_cursor": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "IfIndicators": {
+                          "actions": {
+                            "ForEach_Indicator": {
+                              "foreach": "@body('Parse_Indicators_Response')?['indicators']",
+                              "actions": {
+                                "Append_to_collectedIndicators": {
+                                  "runAfter": {
+                                    "Compose_Sentinel_Indicator": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "type": "AppendToArrayVariable",
+                                  "inputs": {
+                                    "name": "collectedIndicators",
+                                    "value": "@outputs('Compose_Sentinel_Indicator')"
+                                  }
+                                },
+                                "Compose_Sentinel_Indicator": {
+                                  "type": "Compose",
+                                  "inputs": {
+                                    "kind": "indicator",
+                                    "properties": {
+                                      "displayName": "@items('ForEach_Indicator')?['id']",
+                                      "description": "Lumen Threat Intelligence Indicator",
+                                      "pattern": "@concat('[', items('ForEach_Indicator')?['type'], ':value = \"', items('ForEach_Indicator')?['value'], '\"]')",
+                                      "patternType": "stix",
+                                      "source": "Lumen Technologies",
+                                      "validFrom": "@items('ForEach_Indicator')?['created_time']",
+                                      "validUntil": "@items('ForEach_Indicator')?['valid_until']",
+                                      "confidence": "@if(equals(items('ForEach_Indicator')?['confidence'], 'high'), 85, if(equals(items('ForEach_Indicator')?['confidence'], 'medium'), 65, 45))",
+                                      "threatTypes": "@items('ForEach_Indicator')?['labels']",
+                                      "externalId": "@items('ForEach_Indicator')?['id']"
+                                    }
+                                  }
+                                }
+                              },
+                              "type": "Foreach"
+                            },
+                            "Upload_to_Sentinel": {
+                              "runAfter": {
+                                "ForEach_Indicator": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "ApiConnection",
+                              "inputs": {
+                                "body": {
+                                  "indicators": "@variables('collectedIndicators')",
+                                  "sourcesystem": "Lumen-LogicApp"
+                                },
+                                "host": {
+                                  "connection": {
+                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                  }
+                                },
+                                "method": "put",
+                                "path": "/threatintelligence/main/createOrUpdate/indicators"
+                              }
+                            },
+                            "Update_Cursor": {
+                              "runAfter": {
+                                "Upload_to_Sentinel": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "SetVariable",
+                              "inputs": {
+                                "name": "cursor",
+                                "value": "@body('Parse_Indicators_Response')?['next_cursor']"
+                              }
+                            },
+                            "Store_Cursor": {
+                              "runAfter": {
+                                "Update_Cursor": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "ApiConnection",
+                              "inputs": {
+                                "body": "@string(variables('cursor'))",
+                                "headers": {
+                                  "ReadFileMetadataFromServer": true
+                                },
+                                "host": {
+                                  "connection": {
+                                    "name": "@parameters('$connections')['azureblob']['connectionId']"
+                                  }
+                                },
+                                "method": "put",
+                                "path": "/v2/datasets/@{encodeURIComponent(encodeURIComponent(parameters('StorageAccountName')))}/files/@{encodeURIComponent(encodeURIComponent(parameters('StorageAccountContainerName'),'/',parameters('BlobNameCursor')))}"
+                              }
+                            }
+                          },
+                          "runAfter": {
+                            "Parse_Indicators_Response": [
+                              "Succeeded"
+                            ]
+                          },
+                          "expression": {
+                            "and": [
+                              {
+                                "greater": [
+                                  "@length(body('Parse_Indicators_Response')?['indicators'])",
+                                  0
+                                ]
+                              }
+                            ]
+                          },
+                          "type": "If"
+                        }
+                      },
+                      "runAfter": {
+                        "Step1_RequestPresignedURL": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "Scope"
+                    }
+                  }
+                },
+                "parameters": {
+                  "$connections": {
+                    "value": {
+                      "azureblob": {
+                        "connectionId": "[[resourceId('Microsoft.Web/connections', variables('AzureBlobConnectionName'))]",
+                        "connectionName": "[[variables('AzureBlobConnectionName')]",
+                        "id": "[[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', variables('workspace-location-inline'), '/managedApis/azureblob')]"
+                      },
+                      "azuresentinel": {
+                        "connectionId": "[[resourceId('Microsoft.Web/connections', variables('MicrosoftSentinelConnectionName'))]",
+                        "connectionName": "[[variables('MicrosoftSentinelConnectionName')]",
+                        "id": "[[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', variables('workspace-location-inline'), '/managedApis/azuresentinel')]"
+                      },
+                      "keyvault": {
+                        "connectionId": "[[resourceId('Microsoft.Web/connections', variables('AzureKeyVaultConnectionName'))]",
+                        "connectionName": "[[variables('AzureKeyVaultConnectionName')]",
+                        "id": "[[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', variables('workspace-location-inline'), '/managedApis/keyvault')]"
+                      }
+                    }
+                  },
+                  "StorageAccountName": {
+                    "value": "[[parameters('StorageAccountName')]"
+                  },
+                  "StorageAccountContainerName": {
+                    "value": "[[parameters('StorageAccountContainerName')]"
+                  },
+                  "BlobNameCursor": {
+                    "value": "[[concat('cursorSentinel.txt')]"
+                  },
+                  "BlobNameFromDate": {
+                    "value": "[[concat('fromdateSentinel.txt')]"
+                  },
+                  "LookBackDays": {
+                    "value": "[[parameters('LookBackDays')]"
+                  },
+                  "WorkspaceID": {
+                    "value": "[[parameters('WorkspaceID')]"
+                  }
+                }
+              }
+            },
+            {
+              "type": "Microsoft.OperationalInsights/workspaces/providers/metadata",
+              "apiVersion": "2022-01-01-preview",
+              "name": "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/',concat('Playbook-', last(split(variables('playbookId1'),'/'))))]",
+              "properties": {
+                "parentId": "[variables('playbookId1')]",
+                "contentId": "[variables('_playbookContentId1')]",
+                "kind": "Playbook",
+                "version": "[variables('playbookVersion1')]",
+                "source": {
+                  "kind": "Solution",
+                  "name": "Lumen",
+                  "sourceId": "[variables('_solutionId')]"
+                },
+                "author": {
+                  "name": "Lumen Technologies",
+                  "email": "[variables('_email')]"
+                },
+                "support": {
+                  "name": "Lumen Technologies",
+                  "email": "support@lumen.com",
+                  "tier": "Partner",
+                  "link": "https://www.lumen.com"
+                }
+              }
+            }
+          ],
+          "metadata": {
+            "title": "Lumen Threat Intelligence to Sentinel",
+            "description": "This playbook ingests threat intelligence indicators from Lumen's API into Microsoft Sentinel using a two-step presigned URL process.",
+            "prerequisites": [
+              "1. An active Lumen account with API access. For more information, please contact your Lumen representative.",
+              "2. Lumen API key for x-api-key header authentication.",
+              "3. Pre-existing [Key Vault](https://docs.microsoft.com/azure/key-vault/general/basic-concepts) for securely storing Lumen API key. Store the API key as a secret under the `LumenAPIKeySentinel` key.",
+              "4. Pre-existing [Storage account](https://learn.microsoft.com/azure/storage/common/storage-account-overview) with blob container already created for persisting data such as cursor between the API calls.",
+              "5. Threat Intelligence connector enabled in Sentinel. Go to Sentinel instance → 'Content hub' and install 'Threat Intelligence' solution."
+            ],
+            "postDeployment": [
+              "1. Go to the Key Vault. Select `Access control (IAM)` → `+ Add` → `Add role assignment`. Choose `Key Vault Secrets User`. On the next screen hit `+ Select members`, search for the newly created logic app and select it. Proceed with granting access rights.",
+              "2. Go to the selected Log Analytics workspace and repeat step 1. except grant role `Microsoft Sentinel Contributor`.",
+              "3. Go to created `Logic App` → `Edit`. Navigate to the Threat Intelligence upload action and create a new connection. Select `Connect with managed identity`, provide connection name and click `Create`.",
+              "4. Optionally change the schedule's frequency in `Recurrence` block (the first one)."
+            ],
+            "lastUpdateTime": "2025-06-03T00:00:00Z",
+            "entities": [
+              "ip",
+              "filehash",
+              "url",
+              "domain"
+            ],
+            "tags": [
+              "ThreatIntelligence"
+            ],
+            "releaseNotes": {
+              "version": "1.0",
+              "title": "[variables('blanks')]",
+              "notes": [
+                "Initial version"
+              ]
+            }
+          }
+        },
+        "packageKind": "Solution",
+        "packageVersion": "[variables('_solutionVersion')]",
+        "packageName": "[variables('_solutionName')]",
+        "packageId": "[variables('_solutionId')]",
+        "contentSchemaVersion": "3.0.0",
+        "contentId": "[variables('_playbookContentId1')]",
+        "contentKind": "Playbook",
+        "displayName": "Lumen-ImportThreatIntelligenceToSentinel",
+        "contentProductId": "[variables('_playbookcontentProductId1')]",
+        "id": "[variables('_playbookcontentProductId1')]",
+        "version": "[variables('playbookVersion1')]"
+      }
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/contentTemplates",
+      "apiVersion": "2023-04-01-preview",
+      "name": "[variables('workbookTemplateSpecName1')]",
+      "location": "[parameters('workspace-location')]",
+      "dependsOn": [
+        "[extensionResourceId(resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspace')), 'Microsoft.SecurityInsights/contentPackages', variables('_solutionId'))]"
+      ],
+      "properties": {
+        "description": "LumenThreatIntelligenceOverview Workbook with template version 3.0.0",
+        "mainTemplate": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "[variables('workbookVersion1')]",
+          "parameters": {},
+          "variables": {},
+          "resources": [
+            {
+              "type": "Microsoft.Insights/workbooks",
+              "name": "[variables('workbookContentId1')]",
+              "location": "[parameters('workspace-location')]",
+              "kind": "shared",
+              "apiVersion": "2021-08-01",
+              "metadata": {
+                "description": ""
+              },
+              "properties": {
+                "displayName": "[parameters('workbook1-name')]",
+                "serializedData": "{\"version\":\"Notebook/1.0\",\"items\":[{\"type\":1,\"content\":{\"json\":\"# Lumen Threat Intelligence Overview\\nThis workbook provides comprehensive insights into Lumen threat intelligence indicators and helps you monitor IOCs, track threat trends, and investigate threat actor activities.\\n\\n---\"},\"name\":\"Title\"},{\"type\":3,\"content\":{\"version\":\"KqlItem/1.0\",\"query\":\"ThreatIntelligenceIndicator\\n| where Description has \\\"Lumen Threat Intelligence\\\"\\n| where TimeGenerated > ago(24h)\\n| summarize TotalIndicators = count(), \\n           UniqueThreats = dcount(ThreatType),\\n           HighConfidence = countif(ConfidenceScore >= 80),\\n           ActiveIndicators = countif(ExpirationDateTime > now() or isnull(ExpirationDateTime))\\n| extend HighConfidencePercentage = round((HighConfidence * 100.0 / TotalIndicators), 2),\\n         ActivePercentage = round((ActiveIndicators * 100.0 / TotalIndicators), 2)\",\"size\":4,\"title\":\"Threat Intelligence Summary - Last 24 Hours\",\"timeContext\":{\"durationMs\":86400000},\"queryType\":0,\"resourceType\":\"microsoft.operationalinsights/workspaces\",\"visualization\":\"tiles\",\"tileSettings\":{\"titleContent\":{\"columnMatch\":\"TotalIndicators\",\"formatter\":1},\"leftContent\":{\"columnMatch\":\"TotalIndicators\",\"formatter\":12,\"formatOptions\":{\"palette\":\"auto\"}},\"showBorder\":false}},\"name\":\"ThreatIntelSummary\"},{\"type\":3,\"content\":{\"version\":\"KqlItem/1.0\",\"query\":\"ThreatIntelligenceIndicator\\n| where Description has \\\"Lumen Threat Intelligence\\\"\\n| where TimeGenerated > ago(7d)\\n| extend IndicatorType = case(\\n    isnotempty(NetworkIP), \\\"IP\\\",\\n    isnotempty(DomainName), \\\"Domain\\\", \\n    isnotempty(Url), \\\"URL\\\",\\n    isnotempty(FileHashValue), \\\"FileHash\\\",\\n    \\\"Other\\\"\\n)\\n| make-series IndicatorCount = count() on TimeGenerated from ago(7d) to now() step 1h by IndicatorType\\n| render timechart\",\"size\":0,\"title\":\"Indicator Trends by Type - Last 7 Days\",\"timeContext\":{\"durationMs\":604800000},\"queryType\":0,\"resourceType\":\"microsoft.operationalinsights/workspaces\"},\"name\":\"IndicatorTrends\"},{\"type\":3,\"content\":{\"version\":\"KqlItem/1.0\",\"query\":\"ThreatIntelligenceIndicator\\n| where Description has \\\"Lumen Threat Intelligence\\\"\\n| where TimeGenerated > ago(24h)\\n| extend IndicatorType = case(\\n    isnotempty(NetworkIP), \\\"IP\\\",\\n    isnotempty(DomainName), \\\"Domain\\\", \\n    isnotempty(Url), \\\"URL\\\",\\n    isnotempty(FileHashValue), \\\"FileHash\\\",\\n    \\\"Other\\\"\\n)\\n| summarize Count = count() by IndicatorType\\n| render piechart\",\"size\":0,\"title\":\"Indicator Distribution by Type\",\"timeContext\":{\"durationMs\":86400000},\"queryType\":0,\"resourceType\":\"microsoft.operationalinsights/workspaces\"},\"name\":\"IndicatorDistribution\"},{\"type\":3,\"content\":{\"version\":\"KqlItem/1.0\",\"query\":\"ThreatIntelligenceIndicator\\n| where Description has \\\"Lumen Threat Intelligence\\\"\\n| where TimeGenerated > ago(24h)\\n| extend ConfidenceLevel = case(\\n    ConfidenceScore >= 90, \\\"Very High (90-100)\\\",\\n    ConfidenceScore >= 70, \\\"High (70-89)\\\",\\n    ConfidenceScore >= 50, \\\"Medium (50-69)\\\",\\n    ConfidenceScore >= 30, \\\"Low (30-49)\\\",\\n    \\\"Very Low (0-29)\\\"\\n)\\n| summarize Count = count() by ConfidenceLevel\\n| render columnchart\",\"size\":0,\"title\":\"Confidence Score Distribution\",\"timeContext\":{\"durationMs\":86400000},\"queryType\":0,\"resourceType\":\"microsoft.operationalinsights/workspaces\"},\"name\":\"ConfidenceDistribution\"},{\"type\":3,\"content\":{\"version\":\"KqlItem/1.0\",\"query\":\"ThreatIntelligenceIndicator\\n| where Description has \\\"Lumen Threat Intelligence\\\"\\n| where TimeGenerated > ago(7d)\\n| where isnotempty(Tags)\\n| mv-expand Tag = parse_json(Tags)\\n| where Tag has_any (\\\"apt\\\", \\\"malware\\\", \\\"ransomware\\\", \\\"campaign\\\")\\n| summarize Count = count() by tostring(Tag)\\n| top 10 by Count desc\\n| render barchart\",\"size\":0,\"title\":\"Top Threat Categories - Last 7 Days\",\"timeContext\":{\"durationMs\":604800000},\"queryType\":0,\"resourceType\":\"microsoft.operationalinsights/workspaces\"},\"name\":\"ThreatCategories\"},{\"type\":3,\"content\":{\"version\":\"KqlItem/1.0\",\"query\":\"ThreatIntelligenceIndicator\\n| where Description has \\\"Lumen Threat Intelligence\\\"\\n| where TimeGenerated > ago(24h)\\n| where ConfidenceScore >= 80\\n| extend IndicatorType = case(\\n    isnotempty(NetworkIP), \\\"IP\\\",\\n    isnotempty(DomainName), \\\"Domain\\\", \\n    isnotempty(Url), \\\"URL\\\",\\n    isnotempty(FileHashValue), \\\"FileHash\\\",\\n    \\\"Other\\\"\\n), IndicatorValue = case(\\n    isnotempty(NetworkIP), NetworkIP,\\n    isnotempty(DomainName), DomainName,\\n    isnotempty(Url), Url,\\n    isnotempty(FileHashValue), FileHashValue,\\n    \\\"Unknown\\\"\\n)\\n| project TimeGenerated, IndicatorType, IndicatorValue, ThreatType, ConfidenceScore, ThreatSeverity, Tags\\n| order by ConfidenceScore desc, TimeGenerated desc\\n| limit 50\",\"size\":0,\"title\":\"High Confidence Indicators - Last 24 Hours\",\"timeContext\":{\"durationMs\":86400000},\"queryType\":0,\"resourceType\":\"microsoft.operationalinsights/workspaces\",\"gridSettings\":{\"formatters\":[{\"columnMatch\":\"ConfidenceScore\",\"formatter\":8,\"formatOptions\":{\"palette\":\"redGreen\"}},{\"columnMatch\":\"ThreatSeverity\",\"formatter\":18,\"formatOptions\":{\"thresholdsOptions\":\"colors\",\"thresholdsGrid\":[{\"operator\":\"==\",\"thresholdValue\":\"High\",\"representation\":\"redBright\"},{\"operator\":\"==\",\"thresholdValue\":\"Medium\",\"representation\":\"yellow\"},{\"operator\":\"==\",\"thresholdValue\":\"Low\",\"representation\":\"green\"}]}}]}},\"name\":\"HighConfidenceIndicators\"}],\"fallbackResourceIds\":[\"/subscriptions/{subscription-id}/resourceGroups/{resource-group-name}/providers/Microsoft.OperationalInsights/workspaces/{workspace-name}\"],\"$schema\":\"https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json\"}\r\n",
+                "version": "1.0",
+                "sourceId": "[variables('workspaceResourceId')]",
+                "category": "sentinel"
+              }
+            },
+            {
+              "type": "Microsoft.OperationalInsights/workspaces/providers/metadata",
+              "apiVersion": "2022-01-01-preview",
+              "name": "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/',concat('Workbook-', last(split(variables('workbookId1'),'/'))))]",
+              "properties": {
+                "description": ".description",
+                "parentId": "[variables('workbookId1')]",
+                "contentId": "[variables('_workbookContentId1')]",
+                "kind": "Workbook",
+                "version": "[variables('workbookVersion1')]",
+                "source": {
+                  "kind": "Solution",
+                  "name": "Lumen",
+                  "sourceId": "[variables('_solutionId')]"
+                },
+                "author": {
+                  "name": "Lumen Technologies",
+                  "email": "[variables('_email')]"
+                },
+                "support": {
+                  "name": "Lumen Technologies",
+                  "email": "support@lumen.com",
+                  "tier": "Partner",
+                  "link": "https://www.lumen.com"
+                }
+              }
+            }
+          ]
+        },
+        "packageKind": "Solution",
+        "packageVersion": "[variables('_solutionVersion')]",
+        "packageName": "[variables('_solutionName')]",
+        "packageId": "[variables('_solutionId')]",
+        "contentSchemaVersion": "3.0.0",
+        "contentId": "[variables('_workbookContentId1')]",
+        "contentKind": "Workbook",
+        "displayName": "[parameters('workbook1-name')]",
+        "contentProductId": "[variables('_workbookcontentProductId1')]",
+        "id": "[variables('_workbookcontentProductId1')]",
+        "version": "[variables('workbookVersion1')]"
+      }
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/contentPackages",
+      "apiVersion": "2023-04-01-preview",
+      "location": "[parameters('workspace-location')]",
+      "properties": {
+        "version": "3.0.0",
+        "kind": "Solution",
+        "contentSchemaVersion": "3.0.0",
+        "displayName": "Lumen",
+        "publisherDisplayName": "Lumen Technologies",
+        "descriptionHtml": "<p><strong>Note:</strong> Please refer to the following before installing the solution:</p>\n<p>• Review the solution <a href=\"https://github.com/Azure/Azure-Sentinel/tree/master/Solutions/Lumen/ReleaseNotes.md\">Release Notes</a></p>\n<p>• There may be <a href=\"https://aka.ms/sentinelsolutionsknownissues\">known issues</a> pertaining to this Solution, please refer to them before installing.</p>\n<p>The <a href=\"https://www.lumen.com/\">Lumen</a> Threat Intelligence solution provides comprehensive threat intelligence ingestion capabilities for Microsoft Sentinel. This solution utilizes Logic Apps to collect, process, and enrich threat intelligence data from Lumen's threat intelligence platform, delivering indicators directly to Microsoft Sentinel's Threat Intelligence store.</p>\n<p><strong>Underlying Microsoft Technologies used:</strong></p>\n<p>This solution takes a dependency on the following technologies, and some of these dependencies either may be in <a href=\"https://azure.microsoft.com/support/legal/preview-supplemental-terms/\">Preview</a> state or might result in additional ingestion or operational costs:</p>\n<ol type=\"a\">\n<li><p><a href=\"https://azure.microsoft.com/services/logic-apps/\">Logic Apps</a></p>\n</li>\n<li><p><a href=\"https://docs.microsoft.com/azure/sentinel/understand-threat-intelligence\">Microsoft Sentinel Threat Intelligence Platform APIs</a></p>\n</li>\n<li><p><a href=\"https://azure.microsoft.com/services/key-vault/\">Azure Key Vault</a></p>\n</li>\n<li><p><a href=\"https://azure.microsoft.com/services/storage/blobs/\">Azure Blob Storage</a></p>\n</li>\n</ol>\n<p><strong>Workbooks:</strong> 1, <strong>Playbooks:</strong> 1</p>\n<p><a href=\"https://aka.ms/azuresentinel\">Learn more about Microsoft Sentinel</a> | <a href=\"https://aka.ms/azuresentinelsolutionsdoc\">Learn more about Solutions</a></p>\n",
+        "contentKind": "Solution",
+        "contentProductId": "[variables('_solutioncontentProductId')]",
+        "id": "[variables('_solutioncontentProductId')]",
+        "icon": "<img src=\"https://raw.githubusercontent.com/Azure/Azure-Sentinel/master/Solutions/Lumen/Workbooks/Images/Logo/lumen_logo.svg\" width=\"75px\" height=\"75px\">",
+        "contentId": "[variables('_solutionId')]",
+        "parentId": "[variables('_solutionId')]",
+        "source": {
+          "kind": "Solution",
+          "name": "Lumen",
+          "sourceId": "[variables('_solutionId')]"
+        },
+        "author": {
+          "name": "Lumen Technologies",
+          "email": "[variables('_email')]"
+        },
+        "support": {
+          "name": "Lumen Technologies",
+          "email": "support@lumen.com",
+          "tier": "Partner",
+          "link": "https://www.lumen.com"
+        },
+        "dependencies": {
+          "operator": "AND",
+          "criteria": [
+            {
+              "kind": "Playbook",
+              "contentId": "[variables('_Lumen-ImportThreatIntelligenceToSentinel')]",
+              "version": "[variables('playbookVersion1')]"
+            },
+            {
+              "kind": "Workbook",
+              "contentId": "[variables('_workbookContentId1')]",
+              "version": "[variables('workbookVersion1')]"
+            }
+          ]
+        },
+        "firstPublishDate": "2025-05-30",
+        "providers": [
+          "Lumen Technologies"
+        ],
+        "categories": {
+          "domains": [
+            "Security - Threat Intelligence"
+          ]
+        }
+      },
+      "name": "[concat(parameters('workspace'),'/Microsoft.SecurityInsights/', variables('_solutionId'))]"
+    }
+  ],
+  "outputs": {}
+}

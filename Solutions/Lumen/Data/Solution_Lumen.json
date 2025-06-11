@@ -1,0 +1,14 @@
+{
+  "Name": "Lumen",
+  "Author": "Lumen Technologies - support@lumen.com",
+  "Logo": "<img src=\"https://raw.githubusercontent.com/Azure/Azure-Sentinel/master/Solutions/Lumen/Workbooks/Images/Logo/lumen_logo.svg\" width=\"75px\" height=\"75px\">",  "Description": "The [Lumen](https://www.lumen.com/) Threat Intelligence solution provides comprehensive threat intelligence ingestion capabilities for Microsoft Sentinel. This solution utilizes Logic Apps to collect, process, and enrich threat intelligence data from Lumen's threat intelligence platform, delivering indicators directly to Microsoft Sentinel's Threat Intelligence store.\r\n\r\n**Underlying Microsoft Technologies used:**\r\n\r\nThis solution takes a dependency on the following technologies, and some of these dependencies either may be in [Preview](https://azure.microsoft.com/support/legal/preview-supplemental-terms/) state or might result in additional ingestion or operational costs:\r\n\r\na. [Logic Apps](https://azure.microsoft.com/services/logic-apps/)\r\n\r\nb. [Microsoft Sentinel Threat Intelligence Platform APIs](https://docs.microsoft.com/azure/sentinel/understand-threat-intelligence)\r\n\r\nc. [Azure Key Vault](https://azure.microsoft.com/services/key-vault/)\r\n\r\nd. [Azure Blob Storage](https://azure.microsoft.com/services/storage/blobs/)",  "Data Connectors": [
+  ],
+  "Playbooks": [
+    "Playbooks/Lumen-ImportThreatIntelligenceToSentinel/azuredeploy.json"
+  ],
+  "BasePath": "C:\\Users\\mrapo\\VSCode Projects\\Azure-Sentinel\\Solutions\\Lumen\\",
+  "Version": "3.0.0",
+  "Metadata": "SolutionMetadata.json",
+  "TemplateSpec": true,
+  "Is1PConnector": false
+}

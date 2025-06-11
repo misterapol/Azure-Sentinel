@@ -1,0 +1,35 @@
+{
+	"publisherId": "lumen",
+	"offerId": "azure-sentinel-solution-lumen-threat-intelligence",
+	"firstPublishDate": "2025-06-05",
+	"lastUpdateDate": "2025-06-05",
+	"version": "2.0.0",
+	"providers": [ 
+		"Lumen Technologies" 
+	],
+	"categories": {
+		"domains": [
+			"Security - Threat Intelligence"
+		]
+	},
+	"support": {
+		"name": "Lumen Technologies",
+		"email": "support@lumen.com",
+		"tier": "Partner",
+		"link": "https://www.lumen.com"
+	},
+	"description": "Microsoft Sentinel solution for Lumen Threat Intelligence provides automated ingestion of threat indicators using Logic Apps with native Sentinel threat intelligence capabilities.",
+	"data": [
+		"ThreatIntelligenceIndicator"
+	],
+	"content": [
+		{
+			"type": "Playbook",
+			"path": "Playbooks/Lumen-ThreatIntelligenceImport"
+		},
+		{
+			"type": "Playbook",
+			"path": "Playbooks/Lumen-IP-IndicatorImport"
+		}
+	]
+}

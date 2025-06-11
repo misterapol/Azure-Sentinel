@@ -1,0 +1,406 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "title": "Lumen-IP-IndicatorImport",
+        "description": "This playbook imports IP threat intelligence indicators from Lumen's test API using a two-step process: first requesting a presigned URL, then fetching the STIX indicators from that URL. The indicators are then sent to the Lumen-ThreatIntelligenceImport batch processor for ingestion into Microsoft Sentinel.\n\nThis playbook depends on Lumen-ThreatIntelligenceImport that needs to be installed before this playbook.",
+        "prerequisites": [
+            "First install the Lumen-ThreatIntelligenceImport playbook",
+            "Valid Lumen API key with access to threat intelligence endpoints",
+            "Microsoft Sentinel workspace with Threat Intelligence solution installed"
+        ],
+        "postDeployment": [
+            "After deployment, open the playbook to configure all connections and press save",
+            "Configure the Lumen API connection with your API key",
+            "Ensure the batch receiver playbook name matches your deployment"
+        ],
+        "prerequisitesDeployTemplateFile": "../Lumen-ThreatIntelligenceImport/azuredeploy.json",
+        "lastUpdateTime": "2025-06-05T00:00:00.000Z",
+        "entities": ["ip"],
+        "tags": ["ThreatIntelligence"],        "support": {
+            "tier": "Partner"
+        },
+        "author": {
+            "name": "Lumen Technologies"
+        },
+        "releaseNotes": [
+            {
+                "version": "1.0",
+                "title": "Lumen-IP-IndicatorImport",
+                "notes": ["Initial version with two-step presigned URL API flow"]
+            }        ]
+    },
+    "parameters": {
+        "PlaybookName": {
+            "defaultValue": "Lumen-IP-IndicatorImport",
+            "type": "string"
+        },
+        "PlaybookNameBatching": {
+            "defaultValue": "Lumen-ThreatIntelligenceImport",
+            "type": "String"
+        },        "LumenAPIBaseURL": {
+            "defaultValue": "https://3xjeevrwij.execute-api.us-east-1.amazonaws.com/4364-develop-poc-for-microsoft-sentinel-integration-with-bll",
+            "type": "string",
+            "metadata": {
+                "description": "Base URL for Lumen API endpoints"
+            }        }
+    },
+    "variables": {
+        "LumenAPIConnectionName": "Lumen-API-Connection",
+        "LumenThreatIntelligenceImport": "[parameters('PlaybookNameBatching')]"
+    },    "resources": [
+        {
+            "type": "Microsoft.Web/customApis",
+            "apiVersion": "2016-06-01",
+            "name": "[variables('LumenAPIConnectionName')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "connectionParameters": {
+                    "api_key": {
+                        "type": "securestring",
+                        "uiDefinition": {
+                            "displayName": "API Key",
+                            "description": "The API Key for Lumen Threat Intelligence API",
+                            "tooltip": "Provide your Lumen API Key",
+                            "constraints": {
+                                "tabIndex": 2,
+                                "clearText": false,
+                                "required": "true"
+                            }
+                        }
+                    }
+                },
+                "backendService": {
+                    "serviceUrl": "[parameters('LumenAPIBaseURL')]"
+                },
+                "description": "Lumen Threat Intelligence API connector for accessing threat intelligence data",
+                "displayName": "Lumen Threat Intelligence API",
+                "iconUri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+                "swagger": {
+                    "swagger": "2.0",
+                    "info": {
+                        "title": "Lumen Threat Intelligence API",
+                        "description": "API for accessing Lumen threat intelligence data",
+                        "version": "1.0"
+                    },
+                    "host": "[replace(parameters('LumenAPIBaseURL'), 'https://', '')]",
+                    "basePath": "/",
+                    "schemes": ["https"],
+                    "consumes": ["application/json"],
+                    "produces": ["application/json"],                    
+                    "paths": {                        
+                        "/reputation-query-temp-microsoft-sentinel": {
+                            "post": {
+                                "description": "Get presigned URL for threat intelligence data download from test endpoint",
+                                "operationId": "GetPresignedURL",
+                                "parameters": [
+                                    {
+                                        "name": "x-api-key",
+                                        "in": "header",
+                                        "required": true,
+                                        "type": "string",
+                                        "default": "{api_key}",
+                                        "x-ms-visibility": "internal"
+                                    }
+                                ],                                
+                                "responses": {
+                                    "200": {
+                                        "description": "Success",
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "url": {
+                                                    "type": "string",
+                                                    "description": "Presigned URL for downloading threat intelligence data"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "securityDefinitions": {
+                        "api_key": {
+                            "type": "apiKey",
+                            "name": "x-api-key",
+                            "in": "header"
+                        }
+                    },
+                    "security": [
+                        {
+                            "api_key": []
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "[variables('LumenAPIConnectionName')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/customApis', variables('LumenAPIConnectionName'))]"
+            ],
+            "properties": {
+                "displayName": "[variables('LumenAPIConnectionName')]",
+                "customParameterValues": {},
+                "api": {
+                    "id": "[resourceId('Microsoft.Web/customApis', variables('LumenAPIConnectionName'))]"
+                }
+            }
+        },{
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[parameters('PlaybookName')]",
+            "location": "[resourceGroup().location]",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/connections', variables('LumenAPIConnectionName'))]"
+            ],
+            "tags": {
+                "hidden-SentinelTemplateName": "Lumen-IP-IndicatorImport",
+                "hidden-SentinelTemplateVersion": "1.0",
+                "LogicAppsCategory": "security"
+            },
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        }
+                    },
+                    "triggers": {
+                        "Recurrence": {
+                            "recurrence": {
+                                "frequency": "Hour",
+                                "interval": 6
+                            },
+                            "evaluatedRecurrence": {
+                                "frequency": "Hour",
+                                "interval": 6
+                            },
+                            "type": "Recurrence"
+                        }
+                    },                    
+                    "actions": {
+                        "Step1_RequestPresignedURL": {
+                            "runAfter": {},
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['lumen-api']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "path": "/reputation-query-temp-microsoft-sentinel"
+                            }
+                        },
+                        "Step2_ValidatePresignedURLResponse": {
+                            "runAfter": {
+                                "Step1_RequestPresignedURL": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "If",
+                            "expression": {
+                                "and": [
+                                    {
+                                        "not": {
+                                            "equals": [
+                                                "@body('Step1_RequestPresignedURL')?['url']",
+                                                "@null"
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "not": {
+                                            "equals": [
+                                                "@body('Step1_RequestPresignedURL')?['url']",
+                                                ""
+                                            ]
+                                        }
+                                    }
+                                ]
+                            },
+                            "actions": {                                "Step3_FetchIndicatorsFromPresignedURL": {
+                                    "runAfter": {},
+                                    "type": "Http",
+                                    "inputs": {
+                                        "method": "GET",
+                                        "uri": "@body('Step1_RequestPresignedURL')['url']"
+                                    },
+                                    "runtimeConfiguration": {
+                                        "contentTransfer": {
+                                            "transferMode": "Chunked"
+                                        }
+                                    }
+                                },"Step4_ParseIndicatorsJSON": {
+                                    "runAfter": {
+                                        "Step3_FetchIndicatorsFromPresignedURL": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "ParseJson",
+                                    "inputs": {
+                                        "content": "@body('Step3_FetchIndicatorsFromPresignedURL')",
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sourcesystem": {
+                                                    "type": "string"
+                                                },
+                                                "stixobjects": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "type": {
+                                                                "type": "string"
+                                                            },
+                                                            "id": {
+                                                                "type": "string"
+                                                            },
+                                                            "pattern": {
+                                                                "type": "string"
+                                                            },
+                                                            "pattern_type": {
+                                                                "type": "string"
+                                                            },
+                                                            "pattern_version": {
+                                                                "type": "string"
+                                                            },
+                                                            "valid_from": {
+                                                                "type": "string"
+                                                            },
+                                                            "valid_until": {
+                                                                "type": "string"
+                                                            },
+                                                            "confidence": {
+                                                                "type": "string"
+                                                            },
+                                                            "description": {
+                                                                "type": "string"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },                                "Step5_ValidateIndicatorsResponse": {
+                                    "runAfter": {
+                                        "Step4_ParseIndicatorsJSON": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "If",
+                                    "expression": {
+                                        "and": [
+                                            {
+                                                "not": {
+                                                    "equals": [
+                                                        "@body('Step4_ParseIndicatorsJSON')?['stixobjects']",
+                                                        "@null"
+                                                    ]
+                                                }
+                                            },
+                                            {
+                                                "greater": [
+                                                    "@length(body('Step4_ParseIndicatorsJSON')?['stixobjects'])",
+                                                    0
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Step6_ForEachIndicator": {
+                                            "foreach": "@body('Step4_ParseIndicatorsJSON')?['stixobjects']",
+                                            "actions": {
+                                                "Step7_SendToBatch": {
+                                                    "runAfter": {},
+                                                    "type": "SendToBatch",
+                                                    "inputs": {
+                                                        "batchName": "LumenImportBatch",
+                                                        "content": "@items('Step6_ForEachIndicator')",
+                                                        "host": {
+                                                            "triggerName": "Batch_messages",
+                                                            "workflow": {
+                                                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Logic/workflows/', variables('LumenThreatIntelligenceImport'))]"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "runAfter": {},
+                                            "type": "Foreach",
+                                            "runtimeConfiguration": {
+                                                "concurrency": {
+                                                    "repetitions": 10
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {
+                                            "Step6_NoIndicatorsFound": {
+                                                "runAfter": {},
+                                                "type": "Compose",
+                                                "inputs": {
+                                                    "message": "No indicators found in the response from presigned URL",
+                                                    "responseLength": "@length(coalesce(body('Step4_ParseIndicatorsJSON')?['stixobjects'], createArray()))",
+                                                    "responseData": "@body('Step4_ParseIndicatorsJSON')"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "else": {
+                                "actions": {
+                                    "Step3_InvalidPresignedURLResponse": {
+                                        "runAfter": {},
+                                        "type": "Compose",
+                                        "inputs": {
+                                            "message": "Invalid or missing presigned URL in API response",
+                                            "responseData": "@body('Step1_RequestPresignedURL')"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "lumen-api": {
+                                "connectionId": "[resourceId('Microsoft.Web/connections', variables('LumenAPIConnectionName'))]",
+                                "connectionName": "[variables('LumenAPIConnectionName')]",
+                                "id": "[resourceId('Microsoft.Web/customApis', variables('LumenAPIConnectionName'))]"
+                            }
+                        }
+                    }
+                }
+            }        }
+    ],
+    "outputs": {
+        "LogicAppResourceId": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.Logic/workflows', parameters('PlaybookName'))]"
+        },
+        "LogicAppName": {
+            "type": "string",
+            "value": "[parameters('PlaybookName')]"
+        }
+    }
+}

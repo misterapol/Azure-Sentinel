@@ -1,0 +1,173 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "title": "Lumen-ThreatIntelligenceImport", 
+        "description": "Batch receiver for threat intelligence indicators from Lumen's API into Microsoft Sentinel.",
+        "prerequisites": [
+            "Microsoft Sentinel workspace with Threat Intelligence solution installed"
+        ],        
+        "postDeployment": [
+            "CRITICAL: Grant Logic App managed identity 'Microsoft Sentinel Contributor' role on the Log Analytics workspace",
+            "Navigate to: Log Analytics workspace → Access control (IAM) → Add role assignment",
+            "Role: Microsoft Sentinel Contributor, Assign to: Managed identity → Logic app → Select this Logic App",
+            "Configure batch sender: Set up feeder Logic App to send indicators to this batch receiver"
+        ],
+        "lastUpdateTime": "2025-06-05T00:00:00.000Z",
+        "entities": ["ip", "filehash", "url", "domain"],
+        "tags": ["ThreatIntelligence"],
+        "author": {
+            "name": "Lumen Technologies"
+        },        "support": {
+            "tier": "Partner"
+        }
+    },
+    "parameters": {
+        "PlaybookName": {
+            "defaultValue": "Lumen-ThreatIntelligenceImport",
+            "type": "String"
+        },        
+        "WorkspaceID": {
+            "type": "String",
+            "metadata": {
+                "description": "ID of the Log Analytics workspace to which the indicators will be directed."
+            }
+        }
+    },
+    "variables": {
+        "MicrosoftSentinelConnectionName": "[concat('sentinel-', parameters('PlaybookName'))]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "[variables('MicrosoftSentinelConnectionName')]",
+            "location": "[resourceGroup().location]",
+            "kind": "V1",
+            "properties": {
+                "displayName": "[variables('MicrosoftSentinelConnectionName')]",
+                "customParameterValues": {},
+                "parameterValueType": "Alternative",
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Azuresentinel')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[parameters('PlaybookName')]",
+            "location": "[resourceGroup().location]",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/connections', variables('MicrosoftSentinelConnectionName'))]"
+            ],
+            "tags": {
+                "LogicAppsCategory": "security"
+            },
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        },
+                        "WorkspaceID": {
+                            "type": "String"
+                        }
+                    },
+                    "triggers": {                        
+                        "Batch_messages": {
+                            "type": "Batch",                            
+                            "inputs": {
+                                "configurations": {
+                                    "LumenImportBatch": {
+                                        "releaseCriteria": {
+                                            "messageCount": 100,
+                                            "recurrence": {
+                                                "frequency": "Hour",
+                                                "interval": 4
+                                            }
+                                        }
+                                    }
+                                },
+                                "mode": "Inline"
+                            }
+                        }
+                    },                    "actions": {
+                        "Select_STIX_Objects": {
+                            "runAfter": {},
+                            "type": "Select",
+                            "inputs": {
+                                "from": "@triggerBody()['items']",
+                                "select": "@item()['content']"
+                            }
+                        },
+                        "Upload_STIX_Objects_to_Sentinel": {
+                            "runAfter": {
+                                "Select_STIX_Objects": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "body": {
+                                    "sourcesystem": "Lumen",
+                                    "stixobjects": "@body('Select_STIX_Objects')"
+                                },
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "path": "[concat('/ThreatIntelligence/',parameters('WorkspaceID'),'/UploadStixObjects/')]",
+                                "retryPolicy": {
+                                    "count": 10,
+                                    "interval": "PT20S",
+                                    "maximumInterval": "PT1H",
+                                    "minimumInterval": "PT10S",
+                                    "type": "exponential"
+                                }
+                            }
+                        }
+                    }
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "azuresentinel": {
+                                "connectionId": "[resourceId('Microsoft.Web/connections', variables('MicrosoftSentinelConnectionName'))]",
+                                "connectionName": "[variables('MicrosoftSentinelConnectionName')]",
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Azuresentinel')]",
+                                "connectionProperties": {
+                                    "authentication": {
+                                        "type": "ManagedServiceIdentity"
+                                    }
+                                }
+                            }
+                        }
+                    },                    
+                    "WorkspaceID": {
+                        "value": "[parameters('WorkspaceID')]"
+                    }
+                }
+            }
+        }
+    ],
+    "outputs": {
+        "LogicAppResourceId": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.Logic/workflows', parameters('PlaybookName'))]"
+        },
+        "BatchConfigurationName": {
+            "type": "string",
+            "value": "LumenImportBatch"
+        }
+    }
+}
