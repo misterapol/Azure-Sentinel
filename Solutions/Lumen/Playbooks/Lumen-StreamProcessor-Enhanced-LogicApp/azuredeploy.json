@@ -497,7 +497,8 @@
                     },
                     "outputs": {}
                 },
-                "parameters": {                    "$connections": {
+                "parameters": {                    
+                    "$connections": {
                         "value": {
                             "azuresentinel": {
                                 "connectionId": "[resourceId('Microsoft.Web/connections', variables('SentinelConnectionName'))]",
