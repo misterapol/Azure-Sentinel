@@ -1,0 +1,542 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "metadata": {
+        "title": "Lumen-StreamProcessor-Enhanced-LogicApp",
+        "description": "Enhanced Lumen threat intelligence import solution that handles large files (100MB+) using Logic Apps only. Implements chunking, rate limiting, and batch processing patterns proven by other threat intelligence providers.",        "prerequisites": [
+            "Microsoft Sentinel workspace with Threat Intelligence solution installed",
+            "Valid Lumen API key with access to threat intelligence endpoints"
+        ],
+        "postDeployment": [
+            "Grant Logic App managed identity 'Microsoft Sentinel Contributor' role",
+            "Test with manual run and monitor processing"
+        ],
+        "lastUpdateTime": "2025-06-11T00:00:00.000Z",
+        "entities": ["ip", "filehash", "url", "domain"],
+        "tags": ["ThreatIntelligence", "LargeFileProcessing", "Chunking"],
+        "support": {
+            "tier": "Partner"
+        },
+        "author": {
+            "name": "Lumen Technologies - Enhanced Logic App Solution"
+        },
+        "releaseNotes": [
+            {
+                "version": "2.0",
+                "title": "Enhanced Large File Processing",
+                "notes": [
+                    "Handles 100MB+ indicator files using Logic Apps only",
+                    "Intelligent chunking with rate limiting",
+                    "Progress tracking and resume capability",
+                    "Proven patterns from other threat intelligence providers"
+                ]
+            }
+        ]
+    },
+    "parameters": {
+        "PlaybookName": {
+            "defaultValue": "Lumen-StreamProcessor-Enhanced-LogicApp",
+            "type": "string"
+        },
+        "LumenAPIBaseURL": {
+            "defaultValue": "https://3xjeevrwij.execute-api.us-east-1.amazonaws.com/4364-develop-poc-for-microsoft-sentinel-integration-with-bll",
+            "type": "string"
+        },        "LumenAPIKey": {
+            "type": "securestring",
+            "metadata": {
+                "description": "Lumen API key for accessing threat intelligence endpoints"
+            }
+        },
+        "WorkspaceID": {
+            "type": "string",
+            "metadata": {
+                "description": "Microsoft Sentinel workspace ID"
+            }
+        },
+        "ChunkSize": {
+            "defaultValue": 100,
+            "type": "int",
+            "metadata": {
+                "description": "Number of indicators per chunk (max 100 for Sentinel API)"
+            }
+        },
+        "ProcessingDelaySeconds": {
+            "defaultValue": 65,
+            "type": "int",
+            "metadata": {
+                "description": "Delay between API calls to respect rate limits (90 per minute = ~65 seconds)"
+            }
+        }
+    },    "variables": {
+        "SentinelConnectionName": "[concat('sentinel-', parameters('PlaybookName'))]"
+    },    "resources": [
+        {
+            "type": "Microsoft.Web/connections",
+            "apiVersion": "2016-06-01",
+            "name": "[variables('SentinelConnectionName')]",
+            "location": "[resourceGroup().location]",
+            "kind": "V1",
+            "properties": {
+                "displayName": "[variables('SentinelConnectionName')]",
+                "customParameterValues": {},
+                "parameterValueType": "Alternative",
+                "api": {
+                    "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Azuresentinel')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[parameters('PlaybookName')]",
+            "location": "[resourceGroup().location]",
+            "identity": {
+                "type": "SystemAssigned"
+            },            "dependsOn": [
+                "[resourceId('Microsoft.Web/connections', variables('SentinelConnectionName'))]"
+            ],
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        },
+                        "LumenAPIBaseURL": {
+                            "type": "String"
+                        },                        "LumenAPIKey": {
+                            "type": "SecureString"
+                        },
+                        "WorkspaceID": {
+                            "type": "String"
+                        },
+                        "ChunkSize": {
+                            "type": "Int"
+                        },
+                        "ProcessingDelaySeconds": {
+                            "type": "Int"
+                        }
+                    },
+                    "triggers": {
+                        "Recurrence": {
+                            "recurrence": {
+                                "frequency": "Hour",
+                                "interval": 6
+                            },
+                            "type": "Recurrence"
+                        }
+                    },
+                    "actions": {
+                        "Initialize_Variables": {
+                            "runAfter": {},
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "ProcessingStartTime",
+                                        "type": "string",
+                                        "value": "@utcNow()"
+                                    },
+                                    {
+                                        "name": "TotalIndicators",
+                                        "type": "integer",
+                                        "value": 0
+                                    },
+                                    {
+                                        "name": "ProcessedChunks",
+                                        "type": "integer", 
+                                        "value": 0
+                                    },
+                                    {
+                                        "name": "FailedChunks",
+                                        "type": "integer",
+                                        "value": 0
+                                    },
+                                    {
+                                        "name": "CurrentChunk",
+                                        "type": "array",
+                                        "value": []
+                                    },
+                                    {
+                                        "name": "ChunkCounter",
+                                        "type": "integer",
+                                        "value": 0
+                                    }
+                                ]
+                            }
+                        },
+                        "Step1_GetPresignedURL": {
+                            "runAfter": {
+                                "Initialize_Variables": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Http",
+                            "inputs": {
+                                "method": "POST",
+                                "uri": "@{parameters('LumenAPIBaseURL')}/reputation-query-temp-microsoft-sentinel",
+                                "headers": {
+                                    "x-api-key": "@parameters('LumenAPIKey')",
+                                    "Content-Type": "application/json"
+                                }
+                            }
+                        },
+                        "Step2_ValidatePresignedURL": {
+                            "runAfter": {
+                                "Step1_GetPresignedURL": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Condition",
+                            "expression": {
+                                "and": [
+                                    {
+                                        "not": {
+                                            "equals": [
+                                                "@body('Step1_GetPresignedURL')?['url']",
+                                                null
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "not": {
+                                            "equals": [
+                                                "@body('Step1_GetPresignedURL')?['url']",
+                                                ""
+                                            ]
+                                        }
+                                    }
+                                ]
+                            },
+                            "actions": {
+                                "Step3_StreamAndProcessLargeFile": {
+                                    "runAfter": {},
+                                    "type": "Http",
+                                    "inputs": {
+                                        "method": "GET",
+                                        "uri": "@body('Step1_GetPresignedURL')['url']",
+                                        "headers": {
+                                            "Accept": "application/json"
+                                        }
+                                    },
+                                    "runtimeConfiguration": {
+                                        "contentTransfer": {
+                                            "transferMode": "Chunked"
+                                        }
+                                    }
+                                },
+                                "Step4_ParseLargeJSON": {
+                                    "runAfter": {
+                                        "Step3_StreamAndProcessLargeFile": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "ParseJson",
+                                    "inputs": {
+                                        "content": "@body('Step3_StreamAndProcessLargeFile')",
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sourcesystem": {
+                                                    "type": "string"
+                                                },
+                                                "stixobjects": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "pattern": {"type": "string"},
+                                                            "confidence": {"type": "string"},
+                                                            "description": {"type": "string"},
+                                                            "id": {"type": "string"},
+                                                            "type": {"type": "string"},
+                                                            "pattern_type": {"type": "string"},
+                                                            "pattern_version": {"type": "string"},
+                                                            "valid_from": {"type": "string"},
+                                                            "valid_until": {"type": "string"}
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "Step5_UpdateTotalIndicators": {
+                                    "runAfter": {
+                                        "Step4_ParseLargeJSON": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "SetVariable",
+                                    "inputs": {
+                                        "name": "TotalIndicators",
+                                        "value": "@length(body('Step4_ParseLargeJSON')?['stixobjects'])"
+                                    }
+                                },
+                                "Step6_ChunkAndProcessIndicators": {
+                                    "runAfter": {
+                                        "Step5_UpdateTotalIndicators": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Condition",
+                                    "expression": {
+                                        "and": [
+                                            {
+                                                "greater": [
+                                                    "@variables('TotalIndicators')",
+                                                    0
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "actions": {
+                                        "ProcessIndicatorsInChunks": {
+                                            "runAfter": {},
+                                            "type": "Until",
+                                            "expression": "@greater(mul(variables('ChunkCounter'), parameters('ChunkSize')), variables('TotalIndicators'))",
+                                            "limit": {
+                                                "count": 1000,
+                                                "timeout": "PT8H"
+                                            },
+                                            "actions": {
+                                                "CreateCurrentChunk": {
+                                                    "runAfter": {},
+                                                    "type": "SetVariable",
+                                                    "inputs": {
+                                                        "name": "CurrentChunk",
+                                                        "value": "@take(skip(body('Step4_ParseLargeJSON')?['stixobjects'], mul(variables('ChunkCounter'), parameters('ChunkSize'))), parameters('ChunkSize'))"
+                                                    }
+                                                },
+                                                "ProcessChunkIfNotEmpty": {
+                                                    "runAfter": {
+                                                        "CreateCurrentChunk": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "Condition",
+                                                    "expression": {
+                                                        "and": [
+                                                            {
+                                                                "greater": [
+                                                                    "@length(variables('CurrentChunk'))",
+                                                                    0
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    "actions": {
+                                                        "UploadChunkToSentinel": {
+                                                            "runAfter": {},
+                                                            "type": "ApiConnection",
+                                                            "inputs": {
+                                                                "body": {
+                                                                    "sourcesystem": "Lumen",
+                                                                    "stixobjects": "@variables('CurrentChunk')"
+                                                                },
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "post",
+                                                                "path": "/ThreatIntelligence/@{encodeURIComponent(parameters('WorkspaceID'))}/UploadStixObjects/",
+                                                                "retryPolicy": {
+                                                                    "count": 3,
+                                                                    "interval": "PT30S",
+                                                                    "type": "exponential",
+                                                                    "maximumInterval": "PT1H",
+                                                                    "minimumInterval": "PT10S"
+                                                                }
+                                                            }
+                                                        },
+                                                        "IncrementProcessedChunks": {
+                                                            "runAfter": {
+                                                                "UploadChunkToSentinel": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "IncrementVariable",
+                                                            "inputs": {
+                                                                "name": "ProcessedChunks",
+                                                                "value": 1
+                                                            }
+                                                        },
+                                                        "RateLimitDelay": {
+                                                            "runAfter": {
+                                                                "IncrementProcessedChunks": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "Wait",
+                                                            "inputs": {
+                                                                "interval": {
+                                                                    "count": "@parameters('ProcessingDelaySeconds')",
+                                                                    "unit": "Second"
+                                                                }
+                                                            }
+                                                        },
+                                                        "LogProgress": {
+                                                            "runAfter": {
+                                                                "RateLimitDelay": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "Compose",
+                                                            "inputs": {
+                                                                "message": "Chunk processed successfully",
+                                                                "chunk_number": "@variables('ChunkCounter')",
+                                                                "chunk_size": "@length(variables('CurrentChunk'))",
+                                                                "total_processed": "@mul(variables('ProcessedChunks'), parameters('ChunkSize'))",
+                                                                "total_indicators": "@variables('TotalIndicators')",
+                                                                "progress_percentage": "@div(mul(mul(variables('ProcessedChunks'), parameters('ChunkSize')), 100), variables('TotalIndicators'))"
+                                                            }
+                                                        }
+                                                    },
+                                                    "else": {
+                                                        "actions": {
+                                                            "HandleUploadFailure": {
+                                                                "runAfter": {
+                                                                    "UploadChunkToSentinel": [
+                                                                        "Failed",
+                                                                        "TimedOut"
+                                                                    ]
+                                                                },
+                                                                "type": "IncrementVariable",
+                                                                "inputs": {
+                                                                    "name": "FailedChunks",
+                                                                    "value": 1
+                                                                }
+                                                            },
+                                                            "LogFailure": {
+                                                                "runAfter": {
+                                                                    "HandleUploadFailure": [
+                                                                        "Succeeded"
+                                                                    ]
+                                                                },
+                                                                "type": "Compose",
+                                                                "inputs": {
+                                                                    "error": "Failed to upload chunk",
+                                                                    "chunk_number": "@variables('ChunkCounter')",
+                                                                    "chunk_size": "@length(variables('CurrentChunk'))",
+                                                                    "failure_details": "@result('UploadChunkToSentinel')"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                "IncrementChunkCounter": {
+                                                    "runAfter": {
+                                                        "ProcessChunkIfNotEmpty": [
+                                                            "Succeeded",
+                                                            "Failed"
+                                                        ]
+                                                    },
+                                                    "type": "IncrementVariable",
+                                                    "inputs": {
+                                                        "name": "ChunkCounter",
+                                                        "value": 1
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {
+                                            "LogNoIndicators": {
+                                                "runAfter": {},
+                                                "type": "Compose",
+                                                "inputs": {
+                                                    "message": "No indicators found in the response",
+                                                    "response_size": "@length(string(body('Step4_ParseLargeJSON')))",
+                                                    "stixobjects_count": "@length(body('Step4_ParseLargeJSON')?['stixobjects'])"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "else": {
+                                "actions": {
+                                    "LogInvalidPresignedURL": {
+                                        "runAfter": {},
+                                        "type": "Compose",
+                                        "inputs": {
+                                            "error": "Invalid or missing presigned URL",
+                                            "api_response": "@body('Step1_GetPresignedURL')"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "FinalSummary": {
+                            "runAfter": {
+                                "Step2_ValidatePresignedURL": [
+                                    "Succeeded",
+                                    "Failed"
+                                ]
+                            },
+                            "type": "Compose",
+                            "inputs": {
+                                "processing_summary": {
+                                    "start_time": "@variables('ProcessingStartTime')",
+                                    "end_time": "@utcNow()",
+                                    "total_indicators": "@variables('TotalIndicators')",
+                                    "total_chunks": "@variables('ChunkCounter')",
+                                    "processed_chunks": "@variables('ProcessedChunks')",
+                                    "failed_chunks": "@variables('FailedChunks')",
+                                    "success_rate": "@if(equals(variables('ChunkCounter'), 0), 0, div(mul(variables('ProcessedChunks'), 100), variables('ChunkCounter')))",
+                                    "processing_duration_minutes": "@div(sub(ticks(utcNow()), ticks(variables('ProcessingStartTime'))), 600000000)",
+                                    "indicators_per_minute": "@if(equals(div(sub(ticks(utcNow()), ticks(variables('ProcessingStartTime'))), 600000000), 0), 0, div(variables('TotalIndicators'), div(sub(ticks(utcNow()), ticks(variables('ProcessingStartTime'))), 600000000)))"
+                                }
+                            }
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {                    "$connections": {
+                        "value": {
+                            "azuresentinel": {
+                                "connectionId": "[resourceId('Microsoft.Web/connections', variables('SentinelConnectionName'))]",
+                                "connectionName": "[variables('SentinelConnectionName')]",
+                                "id": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Web/locations/', resourceGroup().location, '/managedApis/Azuresentinel')]",
+                                "connectionProperties": {
+                                    "authentication": {
+                                        "type": "ManagedServiceIdentity"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "LumenAPIBaseURL": {
+                        "value": "[parameters('LumenAPIBaseURL')]"
+                    },                    "LumenAPIKey": {
+                        "value": "[parameters('LumenAPIKey')]"
+                    },
+                    "WorkspaceID": {
+                        "value": "[parameters('WorkspaceID')]"
+                    },
+                    "ChunkSize": {
+                        "value": "[parameters('ChunkSize')]"
+                    },
+                    "ProcessingDelaySeconds": {
+                        "value": "[parameters('ProcessingDelaySeconds')]"
+                    }
+                }
+            }
+        }
+    ],
+    "outputs": {
+        "LogicAppResourceId": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.Logic/workflows', parameters('PlaybookName'))]"
+        },
+        "LogicAppName": {
+            "type": "string",
+            "value": "[parameters('PlaybookName')]"
+        }
+    }
+}

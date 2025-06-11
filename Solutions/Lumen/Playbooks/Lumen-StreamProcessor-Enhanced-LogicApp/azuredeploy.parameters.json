@@ -1,0 +1,23 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "PlaybookName": {
+            "value": "Lumen-StreamProcessor-Enhanced-LogicApp"
+        },
+        "LumenAPIBaseURL": {
+            "value": "https://3xjeevrwij.execute-api.us-east-1.amazonaws.com/4364-develop-poc-for-microsoft-sentinel-integration-with-bll"
+        },        "LumenAPIKey": {
+            "value": ""
+        },
+        "WorkspaceID": {
+            "value": ""
+        },
+        "ChunkSize": {
+            "value": 100
+        },
+        "ProcessingDelaySeconds": {
+            "value": 65
+        }
+    }
+}
