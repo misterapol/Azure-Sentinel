@@ -1,0 +1,354 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",    
+    "parameters": {
+        "PlaybookName": {
+            "defaultValue": "Lumen-IndicatorCollector-Simple",
+            "type": "string"
+        },
+        "LumenAPIBaseURL": {
+            "defaultValue": "https://3xjeevrwij.execute-api.us-east-1.amazonaws.com/4364-develop-poc-for-microsoft-sentinel-integration-with-bll",
+            "type": "string"
+        },
+        "LumenAPIKey": {
+            "type": "securestring",
+            "metadata": {
+                "description": "Lumen API key for accessing threat intelligence endpoints"
+            }
+        },
+        "BatchProcessorName": {
+            "defaultValue": "Lumen-ThreatIntelligenceImport",
+            "type": "string",
+            "metadata": {
+                "description": "Name of the batch processor playbook"
+            }
+        }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[parameters('PlaybookName')]",
+            "location": "[resourceGroup().location]",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "LumenAPIBaseURL": {
+                            "type": "String",
+                            "defaultValue": "[parameters('LumenAPIBaseURL')]"
+                        },
+                        "LumenAPIKey": {
+                            "type": "SecureString",
+                            "defaultValue": "[parameters('LumenAPIKey')]"
+                        },
+                        "BatchProcessorName": {
+                            "type": "String",
+                            "defaultValue": "[parameters('BatchProcessorName')]"
+                        }
+                    },
+                    "triggers": {
+                        "Recurrence": {
+                            "recurrence": {
+                                "frequency": "Hour",
+                                "interval": 6
+                            },
+                            "type": "Recurrence"
+                        }
+                    },
+                    "actions": {
+                        "Initialize_Variables": {
+                            "runAfter": {},
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "ChunkSize",
+                                        "type": "integer",
+                                        "value": 1048576
+                                    },
+                                    {
+                                        "name": "CurrentOffset",
+                                        "type": "integer", 
+                                        "value": 0
+                                    },
+                                    {
+                                        "name": "ProcessedCount",
+                                        "type": "integer",
+                                        "value": 0
+                                    }
+                                ]
+                            }
+                        },
+                        "Get_PresignedURL": {
+                            "runAfter": {
+                                "Initialize_Variables": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Http",
+                            "inputs": {
+                                "method": "POST",
+                                "uri": "@{parameters('LumenAPIBaseURL')}/reputation-query-temp-microsoft-sentinel",
+                                "headers": {
+                                    "x-api-key": "@parameters('LumenAPIKey')",
+                                    "Content-Type": "application/json"
+                                }
+                            }
+                        },
+                        "Process_Small_Chunks": {
+                            "runAfter": {
+                                "Get_PresignedURL": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Until",
+                            "expression": "@equals(variables('ProcessedCount'), -1)",
+                            "limit": {
+                                "count": 200,
+                                "timeout": "PT4H"
+                            },
+                            "actions": {                                "Get_Chunk": {
+                                    "runAfter": {},
+                                    "type": "Http",
+                                    "inputs": {
+                                        "method": "GET",
+                                        "uri": "@body('Get_PresignedURL')['url']",
+                                        "headers": {
+                                            "x-api-key": "@parameters('LumenAPIKey')",
+                                            "Range": "@if(equals(variables('CurrentOffset'), 0), 'bytes=0-1048575', concat('bytes=', variables('CurrentOffset'), '-', add(variables('CurrentOffset'), sub(variables('ChunkSize'), 1))))"
+                                        }
+                                    }
+                                },                                "Debug_Chunk_Response": {
+                                    "runAfter": {
+                                        "Get_Chunk": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Compose",
+                                    "inputs": {
+                                        "chunkRequestSucceeded": true,
+                                        "statusCode": "@outputs('Get_Chunk')['statusCode']",
+                                        "currentOffset": "@variables('CurrentOffset')",
+                                        "isFirstChunk": "@equals(variables('CurrentOffset'), 0)",
+                                        "hasValidResponse": "@equals(outputs('Get_Chunk')['statusCode'], 200)"
+                                    }
+                                },                                "Parse_Complete_Indicators": {
+                                    "runAfter": {
+                                        "Debug_Chunk_Response": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "If",
+                                    "expression": {
+                                        "equals": [
+                                            "@outputs('Debug_Chunk_Response')['isFirstChunk']",
+                                            true
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Parse_First_Chunk": {
+                                            "runAfter": {},
+                                            "type": "Compose",
+                                            "inputs": "@json(string(body('Get_Chunk')))['stixobjects']"
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {
+                                            "Set_No_Data": {
+                                                "runAfter": {},
+                                                "type": "Compose",
+                                                "inputs": "@createArray('NO_DATA')"
+                                            }
+                                        }
+                                    }
+                                },                                "Debug_Parsed_Lines": {
+                                    "runAfter": {
+                                        "Parse_Complete_Indicators": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Compose",
+                                    "inputs": {
+                                        "chunkType": "@if(outputs('Debug_Chunk_Response')['isFirstChunk'], 'FIRST_CHUNK', 'SKIP_CHUNK')",
+                                        "currentOffset": "@variables('CurrentOffset')",
+                                        "hasValidData": "@outputs('Debug_Chunk_Response')['isFirstChunk']"
+                                    }
+                                },                                "Check_Has_Data": {
+                                    "runAfter": {
+                                        "Debug_Parsed_Lines": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "If",
+                                    "expression": {
+                                        "equals": [
+                                            "@outputs('Debug_Chunk_Response')['isFirstChunk']",
+                                            true
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Process_Each_Line": {
+                                            "runAfter": {},
+                                            "type": "Foreach",
+                                            "foreach": "@outputs('Parse_First_Chunk')",
+                                            "actions": {"Log_Line_Content": {
+                                            "runAfter": {},
+                                            "type": "Compose",
+                                            "inputs": {
+                                                "lineNumber": "@iterationIndexes('Process_Each_Line')",
+                                                "indicatorId": "@item()['id']",
+                                                "indicatorType": "@item()['type']",
+                                                "pattern": "@item()['pattern']",
+                                                "objectSize": "@length(string(item()))"
+                                            }
+                                        },"Check_Valid_JSON": {
+                                            "runAfter": {
+                                                "Log_Line_Content": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "If",
+                                            "expression": {
+                                                "and": [
+                                                    {
+                                                        "not": {
+                                                            "equals": [
+                                                                "@item()",
+                                                                null
+                                                            ]
+                                                        }
+                                                    },
+                                                    {
+                                                        "contains": [
+                                                            "@string(item())",
+                                                            "indicator"
+                                                        ]
+                                                    }
+                                                ]                                            },"actions": {
+                                                "Send_to_Batch": {
+                                                    "runAfter": {},
+                                                    "type": "Workflow",
+                                                    "inputs": {
+                                                        "host": {
+                                                            "triggerName": "Batch_messages",
+                                                            "workflow": {
+                                                                "id": "[resourceId('Microsoft.Logic/workflows', parameters('BatchProcessorName'))]"
+                                                            }
+                                                        },
+                                                        "body": {
+                                                            "content": "@item()",
+                                                            "partitionName": "LumenImportBatch"
+                                                        }
+                                                    }
+                                                }}
+                                        }
+                                    }
+                                        }
+                                    }
+                                },                                "Calculate_Smart_Offset": {
+                                    "runAfter": {
+                                        "Check_Has_Data": [
+                                            "Succeeded",
+                                            "Skipped"
+                                        ]
+                                    },
+                                    "type": "Compose",
+                                    "inputs": {
+                                        "chunkType": "@if(outputs('Debug_Chunk_Response')['isFirstChunk'], 'FIRST_CHUNK', 'SKIP_CHUNK')",
+                                        "currentOffset": "@variables('CurrentOffset')",
+                                        "chunkSize": "@variables('ChunkSize')",
+                                        "proposedOffset": "@if(outputs('Debug_Chunk_Response')['isFirstChunk'], -1, add(variables('CurrentOffset'), variables('ChunkSize')))"
+                                    }
+                                },
+                                "Calculate_New_Offset": {
+                                    "runAfter": {
+                                        "Calculate_Smart_Offset": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Compose",
+                                    "inputs": "@outputs('Calculate_Smart_Offset')['proposedOffset']"
+                                },                                "Update_Offset": {
+                                    "runAfter": {
+                                        "Calculate_New_Offset": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "SetVariable",
+                                    "inputs": {
+                                        "name": "CurrentOffset",
+                                        "value": "@outputs('Calculate_New_Offset')"
+                                    }
+                                },                                "Check_End_Condition": {
+                                    "runAfter": {
+                                        "Update_Offset": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "If",
+                                    "expression": {
+                                        "less": [
+                                            "@length(string(body('Get_Chunk')))",
+                                            "@variables('ChunkSize')"
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Set_Complete": {
+                                            "runAfter": {},
+                                            "type": "SetVariable",
+                                            "inputs": {
+                                                "name": "ProcessedCount",
+                                                "value": -1
+                                            }
+                                        }
+                                    },"else": {
+                                        "actions": {
+                                            "Calculate_New_Count": {
+                                                "runAfter": {},
+                                                "type": "Compose",
+                                                "inputs": "@add(variables('ProcessedCount'), 1)"
+                                            },
+                                            "Increment_Counter": {
+                                                "runAfter": {
+                                                    "Calculate_New_Count": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "type": "SetVariable",
+                                                "inputs": {
+                                                    "name": "ProcessedCount",
+                                                    "value": "@outputs('Calculate_New_Count')"
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "Small_Delay": {
+                                    "runAfter": {
+                                        "Check_End_Condition": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Wait",
+                                    "inputs": {
+                                        "interval": {
+                                            "count": 2,
+                                            "unit": "Second"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}

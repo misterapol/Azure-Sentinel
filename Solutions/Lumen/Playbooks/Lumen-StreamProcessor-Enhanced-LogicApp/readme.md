@@ -2,7 +2,7 @@
 
 ## Overview
 
-This enhanced Logic App solution handles large Lumen threat intelligence files (100MB+) using proven patterns from other threat intelligence providers in the Azure Sentinel ecosystem. The solution processes large indicator files entirely in-memory using Logic Apps built-in capabilities, eliminating the need for external storage or Azure Functions.
+This enhanced Logic App solution handles large Lumen threat intelligence files (100MB+) using proven patterns from other threat intelligence providers in the Azure Sentinel ecosystem. The solution processes large indicator files using a chunked download approach with HTTP Range headers, eliminating the need for external storage or Azure Functions.
 
 ## Key Features
 
@@ -19,23 +19,23 @@ This enhanced Logic App solution handles large Lumen threat intelligence files (
 The solution follows proven patterns used by other threat intelligence providers while using only Logic Apps native capabilities:
 
 1. **Presigned URL Retrieval**: Gets download URL from Lumen API
-2. **Streaming Download**: Downloads large JSON file with chunked transfer mode
-3. **In-Memory Processing**: Parses and chunks indicators using Logic Apps array functions
+2. **Chunked Download**: Gets file metadata and downloads in 5MB chunks using HTTP Range headers
+3. **Incremental Processing**: Parses and processes indicators in batches as they're downloaded
 4. **Rate-Limited Upload**: Uploads chunks to Sentinel with intelligent delays
 5. **Progress Monitoring**: Tracks processing status and performance metrics
 
 ## How It Solves the Large File Problem
 
 ### Original Challenge:
-- HTTP action fails with 100MB+ files
+- HTTP action fails with 100MB+ files (Buffer size limit of 104857600 bytes)
 - Logic Apps timeout on large file processing
 - Sentinel API has strict limits (100 objects/request, 100 requests/minute)
 
 ### This Solution:
-1. **Uses Logic Apps streaming capabilities** with `"transferMode": "Chunked"`
+1. **Uses HTTP Range headers** to download file in 5MB chunks, avoiding buffer limitations
 2. **Leverages native array processing** with `take()` and `skip()` functions for chunking
 3. **Implements intelligent rate limiting** (65 seconds = ~90 requests/hour)
-4. **Processes everything in-memory** - no external storage required
+4. **Processes data incrementally** by downloading and processing in manageable chunks
 5. **Provides comprehensive error handling** and retry logic
 
 ## Deployment
@@ -99,6 +99,51 @@ az role assignment create \
 The Logic App provides detailed progress tracking:
 - Total indicators processed
 - Processing duration
+- Chunk processing status and statistics
+
+## Chunked Download Approach
+
+To overcome the 100MB buffer limitation in Logic Apps, this solution uses HTTP Range headers to download files in manageable chunks:
+
+1. **HEAD Request**: First gets file metadata, including Content-Length
+2. **Chunked Downloading**: Splits the download into 5MB chunks using HTTP Range headers
+   - Each request uses `Range: bytes=start-end` header
+   - Handles 206 Partial Content responses and processes each chunk
+   - Processes status 416 (Range Not Satisfiable) as end-of-file indicator
+3. **Incremental Processing**: Each chunk is parsed and added to the collected data
+4. **Batch Processing**: Once all chunks are downloaded, processes the indicators in batches for Sentinel
+
+## Troubleshooting
+
+### Common Issues
+
+1. **BadRequest Error (Buffer Size Exceeded)**
+   - This happens when a file is larger than 104857600 bytes (100MB)
+   - Solution: The chunked download approach should prevent this error
+
+2. **HTTP 416 Status (Requested Range Not Satisfiable)**
+   - This is normal and indicates the file download is complete
+   - It happens when requesting a byte range past the end of the file
+
+3. **Timeout During Processing**
+   - Increase the timeout in the Until loops if processing very large files
+   - Current setting: PT8H (8 hours) should be sufficient for most files
+
+4. **Permission Errors**
+   - Ensure the Logic App has Microsoft Sentinel Contributor role
+   - Verify the API connection is configured to use Managed Identity
+
+5. **Self-reference Error in Variable Updates**
+   - Error: "Self reference is not supported when updating the value of variable"
+   - Solution: We use concat() instead of union() for array merging to avoid self-references
+   - Affects: MergeIndicatorArrays and MergeFinalIndicatorArrays actions
+
+### Monitoring and Debugging
+
+The Logic App includes comprehensive logging:
+- Check "LogRangeRequest" outputs to see the byte ranges requested
+- "Log_FileMetadata" shows details about the file being processed
+- Each chunk processing step has detailed logging of progress
 - Success/failure rates
 - Performance metrics (indicators per minute)
 

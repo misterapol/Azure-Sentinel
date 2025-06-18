@@ -1,0 +1,45 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "LogicAppName": {
+            "type": "string",
+            "metadata": {
+                "description": "Name of the Logic App that needs permissions"
+            }
+        },
+        "WorkspaceResourceId": {
+            "type": "string",
+            "metadata": {
+                "description": "Full resource ID of the Sentinel workspace (e.g., /subscriptions/{sub-id}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{workspace-name})"
+            }
+        }
+    },
+    "variables": {
+        "SentinelContributorRoleId": "ab8e14d6-4a74-4a29-9ba8-549422addade",
+        "LogicAppPrincipalId": "[reference(resourceId('Microsoft.Logic/workflows', parameters('LogicAppName')), '2017-07-01', 'Full').identity.principalId]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Authorization/roleAssignments",
+            "apiVersion": "2020-04-01-preview",
+            "name": "[guid(parameters('WorkspaceResourceId'), parameters('LogicAppName'), variables('SentinelContributorRoleId'))]",
+            "scope": "[parameters('WorkspaceResourceId')]",
+            "properties": {
+                "roleDefinitionId": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Authorization/roleDefinitions/', variables('SentinelContributorRoleId'))]",
+                "principalId": "[variables('LogicAppPrincipalId')]",
+                "principalType": "ServicePrincipal"
+            }
+        }
+    ],
+    "outputs": {
+        "RoleAssignmentId": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.Authorization/roleAssignments', guid(parameters('WorkspaceResourceId'), parameters('LogicAppName'), variables('SentinelContributorRoleId')))]"
+        },
+        "PrincipalId": {
+            "type": "string",
+            "value": "[variables('LogicAppPrincipalId')]"
+        }
+    }
+}
