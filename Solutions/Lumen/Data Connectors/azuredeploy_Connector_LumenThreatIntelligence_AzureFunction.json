@@ -1,26 +1,13 @@
 {
     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-    "contentVersion": "1.0.0.0",
-    "parameters": {
-        "functionAppName": {
+    "contentVersion": "1.0.0.0",    "parameters": {
+        "FunctionName": {
             "type": "string",
-            "defaultValue": "[concat('func-lumen-ti-', uniqueString(resourceGroup().id))]",
+            "defaultValue": "Lumen",
+            "minLength": 1,
+            "maxLength": 11,
             "metadata": {
-                "description": "Name of the Function App"
-            }
-        },
-        "storageAccountName": {
-            "type": "string",
-            "defaultValue": "[concat('stalumentitf', uniqueString(resourceGroup().id))]",
-            "metadata": {
-                "description": "Name of the storage account for the Function App"
-            }
-        },
-        "appInsightsName": {
-            "type": "string",
-            "defaultValue": "[concat('ai-lumen-ti-', uniqueString(resourceGroup().id))]",
-            "metadata": {
-                "description": "Name of Application Insights"
+                "description": "Name prefix for the Function App (will be made unique)"
             }
         },
         "lumenApiKey": {

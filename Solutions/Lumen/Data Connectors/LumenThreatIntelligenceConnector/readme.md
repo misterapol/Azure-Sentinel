@@ -55,10 +55,7 @@ Configure these environment variables in your Azure Function App:
 # Create resource group
 az group create --name rg-lumen-ti --location eastus
 
-# Create storage account
-az storage account create --name stalumentitf001 --resource-group rg-lumen-ti --location eastus --sku Standard_LRS
-
-# Create function app
+# Create function app (storage account will be created automatically)
 az functionapp create --resource-group rg-lumen-ti --consumption-plan-location eastus \
   --runtime python --runtime-version 3.9 --functions-version 4 \
   --name func-lumen-ti-001 --storage-account stalumentitf001
@@ -70,7 +67,7 @@ func azure functionapp publish func-lumen-ti-001
 
 ### Option 3: Deploy via ARM Template
 
-Deploy using the included ARM template (coming soon).
+Deploy using the included ARM template. The storage account will be automatically created with a unique name.
 
 ## Configuration
 
@@ -105,6 +102,23 @@ az functionapp config appsettings set --name func-lumen-ti-001 --resource-group 
   TENANT_ID="87654321-4321-4321-4321-210987654321" \
   WORKSPACE_ID="abcdef12-3456-7890-abcd-ef1234567890"
 ```
+
+## ARM Template Parameters
+
+When deploying via ARM template, you only need to provide:
+
+| Parameter | Description | Required |
+|-----------|-------------|----------|
+| `FunctionName` | Name prefix (max 11 chars) | No (defaults to "Lumen") |
+| `WORKSPACE_ID` | Sentinel Workspace ID | Yes |
+| `LUMEN_API_KEY` | Lumen API Key | Yes |
+| `LUMEN_BASE_URL` | Lumen API URL | No (defaults to standard URL) |
+| `CLIENT_ID` | App Registration Client ID | Yes |
+| `CLIENT_SECRET` | App Registration Secret | Yes |
+| `TENANT_ID` | Azure Tenant ID | No (auto-detected) |
+| `AppInsightsWorkspaceResourceID` | Log Analytics Workspace Resource ID | Yes |
+
+**Note**: Storage account name is automatically generated - no need to specify it!
 
 ## Scheduling
 
