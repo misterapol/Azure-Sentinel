@@ -55,10 +55,8 @@
                 "description": "Location for all resources"
             }
         }
-    },
-    "variables": {
-        "hostingPlanName": "[concat('plan-', parameters('functionAppName'))]",
-        "packageUri": "https://github.com/misterapol/Azure-Sentinel/raw/master/Solutions/Lumen/Data%20Connectors/LumenThreatIntelligenceConnector.zip"
+    },    "variables": {
+        "hostingPlanName": "[concat('plan-', parameters('functionAppName'))]"
     },
     "resources": [
         {
@@ -162,10 +160,13 @@
                         {
                             "name": "TENANT_ID",
                             "value": "[parameters('tenantId')]"
-                        },
-                        {
+                        },                        {
                             "name": "WORKSPACE_ID",
                             "value": "[parameters('workspaceId')]"
+                        },
+                        {
+                            "name": "WEBSITE_RUN_FROM_PACKAGE",
+                            "value": "https://github.com/misterapol/Azure-Sentinel/raw/master/Solutions/Lumen/Data%20Connectors/LumenThreatIntelligenceConnector.zip"
                         }
                     ],
                     "pythonVersion": "3.9"

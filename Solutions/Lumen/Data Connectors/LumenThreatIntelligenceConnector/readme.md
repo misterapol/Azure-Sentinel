@@ -67,7 +67,26 @@ func azure functionapp publish func-lumen-ti-001
 
 ### Option 3: Deploy via ARM Template
 
-Deploy using the included ARM template. The storage account will be automatically created with a unique name.
+Deploy using the included ARM template (recommended: use v2 template). The storage account and function code will be automatically deployed:
+
+```bash
+# Deploy using the v2 template (recommended)
+az deployment group create \
+  --resource-group rg-lumen-ti \
+  --template-file "azuredeploy_Connector_LumenThreatIntelligence_AzureFunction_v2.json" \
+  --parameters \
+    FunctionName="Lumen" \
+    WORKSPACE_ID="your-workspace-id" \
+    LUMEN_API_KEY="your-api-key" \
+    CLIENT_ID="your-client-id" \
+    CLIENT_SECRET="your-client-secret" \
+    AppInsightsWorkspaceResourceID="/subscriptions/.../workspaces/..."
+```
+
+**✨ The v2 template automatically:**
+- Creates storage account with unique name
+- Downloads and deploys function code from GitHub
+- Sets up all required configurations
 
 ## Configuration
 
